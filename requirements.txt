@@ -1,0 +1,4 @@
+SQLAlchemy==1.3.13
+recordclass==0.13.2
+tqdm==4.43.0
+cli-ui==0.10.2
