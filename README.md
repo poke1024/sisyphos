@@ -1,9 +1,12 @@
-A small, versatile, no-nonsense solution for simple batches.
+A small db-based ACID processor for simple batches.
 
 * support for multiple processing stages
 * support for simple DAG data flow pipelines
 * concurrent (e.g. runs in multiple processes)
-* robust interrupt and resume (i.e. sound transactions)
+* robust interrupt and resume (i.e. safe transactions)
+
+You might still be better off using file-based batch processors
+in many cases, since they are easier to debug.
 
 # Caveats
 
