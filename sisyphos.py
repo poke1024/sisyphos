@@ -253,6 +253,7 @@ class Sisyphos:
 	def migrate(self):
 		if self._migration:
 			self._migration.run()
+		sys.exit(0)
 
 	@property
 	def processors(self):
@@ -545,13 +546,15 @@ class Sisyphos:
 					for task in conn.execute(selection).fetchall():
 						task_id = task['id']
 
-						stmt = sqlalchemy.sql.delete([tt]).where(
-							self._err_table[processor.sql_name].c.id == task_id)
+						err_table = self._err_table[processor.sql_name]
+						stmt = sqlalchemy.sql.delete(err_table).where(
+							err_table.c.id == task_id)
 						conn.execute(stmt)
 
 						for x in processor.outputs:
-							stmt = sqlalchemy.sql.delete([tt]).where(
-								self._data_table[self._slot_sql_name(x)].c.id == task_id)
+							data_table = self._data_table[self._slot_sql_name[x]]
+							stmt = sqlalchemy.sql.delete(data_table).where(
+								data_table.c.id == task_id)
 							conn.execute(stmt)
 
 						new_state = dict()
@@ -571,11 +574,11 @@ class Sisyphos:
 
 	def print_status(self):
 		self._ensure_is_migrated()
+
 		tt = self._task_table
+		status_table = []
 
 		conn = self._engine.connect()
-
-		status_table = []
 
 		try:
 			for processor in sorted(self._processors.values(), key=lambda p: len(p.inputs)):
@@ -594,7 +597,45 @@ class Sisyphos:
 			print(tabulate(status_table, headers=["processor"] + [s.name for s in ProcessorState], tablefmt="psql"))
 
 		finally:
-			conn.close()		
+			conn.close()
+
+	def tasks(self):
+		self._ensure_is_migrated()
+
+		tt = self._task_table
+		conn = self._engine.connect()
+
+		try:
+			selection = sqlalchemy.sql.select([tt])
+			for task in conn.execute(selection).fetchall():
+
+				processors = dict()
+				for p in self._processors.values():
+					processors[p.name] = task[PROCESS_STATE_COL % p.sql_name]
+
+				slots = dict()
+				for s in self._slots.values():
+					slots[s.name] = task[SLOT_COL % s.sql_name]
+
+				yield task['input'], processors, slots
+
+		finally:
+			conn.close()
+
+	def print_tasks(self, up_to=10):
+		self._ensure_is_migrated()
+
+		processors = sorted(p.name for p in self._processors.values())
+		slots = sorted(p.name for p in self._slots.values())
+
+		tasks_table = []
+		for task_input, task_processors, task_slots in itertools.islice(self.tasks(), 0, up_to):
+			tasks_table.append(list(itertools.chain(
+				[task_input],
+				[task_processors[x].name for x in processors],
+				[task_slots[x] for x in slots])))
+
+		print(tabulate(tasks_table, headers=["input"] + processors + slots, tablefmt="psql"))
 
 	def outputs(self, processor_name):
 		self._ensure_is_migrated()
@@ -623,6 +664,30 @@ class Sisyphos:
 			outputs_table.append([task_input] + [output_data[x] for x in outputs])
 
 		print(tabulate(outputs_table, headers=["input"] + outputs, tablefmt="psql"))
+
+	def slot(self, slot_name, task_input):
+		self._ensure_is_migrated()
+		slot = self._slots[slot_name]
+		tt = self._task_table
+
+		conn = self._engine.connect()
+
+		try:
+			selection = sqlalchemy.sql.select([tt]).where(tt.c.input == task_input)
+			task = conn.execute(selection).fetchone()
+			if task is None:
+				raise ValueError("task '%s' not found" % task_input)
+
+			dt = self._data_table[slot.sql_name]
+			selection = sqlalchemy.sql.select([dt]).where(dt.c.id == task["id"])
+			data = conn.execute(selection).fetchone()
+			if data is None:
+				raise ValueError("no data in slot '%s' for task '%s'" % (slot_name, task_input))
+
+			return data["data"]
+
+		finally:
+			conn.close()
 
 
 class Processor:
